@@ -1,0 +1,140 @@
+import requests
+from bs4 import BeautifulSoup
+import hashlib
+import csv
+import os
+import time
+from datetime import datetime
+
+TARGET_URL = "https://yourdomain.com/checkout"
+INVENTORY_FILE = "/opt/fim/script_inventory.csv"
+HEADER_HASH_FILE = "/opt/fim/header_integrity.json"
+LOG_FILE = "/opt/fim/script_monitor_log.txt"
+CHECK_INTERVAL_SECONDS = 300
+
+def log(message):
+    with open(LOG_FILE, "a") as f:
+        f.write(f"{datetime.now().isoformat()} - {message}\n")
+
+def load_header_hashes():
+    if os.path.exists(HEADER_HASH_FILE):
+        with open(HEADER_HASH_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_header_hashes(hashes):
+    with open(HEADER_HASH_FILE, "w") as f:
+        json.dump(hashes, f, indent=2)
+
+def hash_headers(headers):
+    important = ['content-security-policy', 'strict-transport-security', 'x-content-type-options']
+    filtered = {k.lower(): v for k, v in headers.items() if k.lower() in important}
+    header_string = ''.join(f"{k}:{v}" for k, v in sorted(filtered.items()))
+    return hashlib.sha256(header_string.encode()).hexdigest()
+
+def hash_dom_structure(html):
+    soup = BeautifulSoup(html, "html.parser")
+    structure = ''.join(tag.name for tag in soup.find_all(True))
+    return hashlib.sha256(structure.encode()).hexdigest()
+
+def monitor_page_integrity(response):
+    header_hashes = load_header_hashes()
+    current_header_hash = hash_headers(response.headers)
+    current_dom_hash = hash_dom_structure(response.text)
+
+    alert = False
+
+    if header_hashes.get('header_hash') != current_header_hash:
+        log("⚠️ HEADER TAMPERING DETECTED")
+        alert = True
+    if header_hashes.get('dom_hash') != current_dom_hash:
+        log("⚠️ DOM STRUCTURE TAMPERING DETECTED")
+        alert = True
+
+    save_header_hashes({'header_hash': current_header_hash, 'dom_hash': current_dom_hash})
+
+    return alert
+
+def get_script_hash(script_url):
+    try:
+        if script_url.startswith("//"):
+            script_url = "https:" + script_url
+        elif script_url.startswith("/"):
+            script_url = TARGET_URL.rstrip("/") + script_url
+        response = requests.get(script_url, timeout=10)
+        response.raise_for_status()
+        return hashlib.sha256(response.content).hexdigest()
+    except Exception as e:
+        log(f"ERROR fetching script {script_url}: {e}")
+        return None
+
+def load_inventory():
+    inventory = {}
+    if not os.path.exists(INVENTORY_FILE):
+        return inventory
+    with open(INVENTORY_FILE, newline="") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            inventory[row['Script URL']] = row
+    return inventory
+
+def save_inventory(inventory):
+    with open(INVENTORY_FILE, "w", newline="") as csvfile:
+        fieldnames = ["Script URL", "Hash", "Justification", "Last Seen", "Status"]
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for url, data in inventory.items():
+            writer.writerow(data)
+
+def check_scripts_and_integrity():
+    try:
+        response = requests.get(TARGET_URL, timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        log(f"ERROR fetching page: {e}")
+        return
+
+    # 11.6.1 content and header integrity check
+    monitor_page_integrity(response)
+
+    # Script extraction and tracking
+    soup = BeautifulSoup(response.text, "html.parser")
+    scripts = [tag.get("src").strip() for tag in soup.find_all("script") if tag.get("src")]
+    inventory = load_inventory()
+    now = datetime.now().isoformat()
+
+    known_urls = set(inventory.keys())
+    current_urls = set(scripts)
+
+    for script_url in scripts:
+        hash_val = get_script_hash(script_url)
+        if not hash_val:
+            continue
+        if script_url not in inventory:
+            log(f"NEW SCRIPT: {script_url}")
+            inventory[script_url] = {
+                "Script URL": script_url,
+                "Hash": hash_val,
+                "Justification": "REVIEW REQUIRED",
+                "Last Seen": now,
+                "Status": "unauthorized"
+            }
+        else:
+            if inventory[script_url]['Hash'] != hash_val:
+                log(f"TAMPERED SCRIPT: {script_url}")
+                inventory[script_url]['Hash'] = hash_val
+                inventory[script_url]['Status'] = 'tampered'
+            inventory[script_url]['Last Seen'] = now
+
+    for removed in known_urls - current_urls:
+        log(f"SCRIPT REMOVED: {removed}")
+        inventory[removed]['Last Seen'] = now
+        inventory[removed]['Status'] = 'missing'
+
+    save_inventory(inventory)
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(INVENTORY_FILE), exist_ok=True)
+    while True:
+        check_scripts_and_integrity()
+        time.sleep(CHECK_INTERVAL_SECONDS)
