@@ -1,17 +1,18 @@
 📜 PCI DSS v4.0.1 Script and Payment Page Integrity Monitoring<br>
 This tool continuously monitors browser-executed scripts on your payment pages and detects unauthorized changes, meeting the requirements of:<br>
 <br>
-✅ Requirement 6.4.3: Manage, inventory, and validate scripts on payment pages.<br>
-✅ Requirement 11.6.1: Detect tampering with HTTP headers or page content delivered to consumers.<br>
-<br>
-✅ Combined Requirements Covered<br>
-Feature	                    6.4.3	    11.6.1	  Description<br>
-Script hash validation	      ✅	      ✅	    Ensures integrity and authorization<br>
-Script inventory CSV	        ✅		            Tracks URLs, hashes, justification<br>
-DOM structure hash		                  ✅	    Detects unexpected changes to HTML layout<br>
-HTTP header hashing		                  ✅	    Detects tampering with CSP, HSTS, etc.<br>
-Alert logging	                ✅	      ✅	    Logs tampering, additions, or changes<br>
-Continuous monitoring loop	  ✅	      ✅	    Runs every 5 minutes<br>
+🔐 Compliance Coverage<br>
+6.4.3 <br>
+✅ Script hash validation<br>
+✅ Script inventory CSV<br>
+✅ Alert logging<br>
+✅ Continuous monitoring loop<br>
+11.6.1 <br>
+✅ Script hash validation<br>
+✅ DOM structure hash<br>
+✅ HTTP header hashing<br>
+✅ Alert logging<br>
+✅ Continuous monitoring loop<br>
 <br>
 📦 Features<br>
 ✅ Scans and inventories all <script> tags from a specified payment page<br>
